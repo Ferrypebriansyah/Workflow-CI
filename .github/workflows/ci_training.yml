@@ -28,7 +28,7 @@ jobs:
 
       - name: Run MLflow Project
         run: |
-          mlflow run MLProject --env-manager=local
+          mlflow run . --env-manager=local
 
       - name: Get latest MLflow run_id
         id: get_runid
@@ -65,5 +65,3 @@ jobs:
       - name: Push Docker image
         run: |
           docker push ${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NAME }}:latest
-
-
