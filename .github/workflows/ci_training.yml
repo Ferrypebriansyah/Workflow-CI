@@ -8,6 +8,9 @@ on:
     branches:
       - main
 
+env:
+  PROJECT_DIR: MLProject # folder tempat MLproject & modelling_tuning.py
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -26,45 +29,59 @@ jobs:
           python -m pip install --upgrade pip
           pip install mlflow seaborn pandas matplotlib scikit-learn joblib dagshub
 
-      # Jalankan MLflow project dari dalam folder MLProject
+      # Jalankan MLflow Project dari folder MLProject
       - name: Run MLflow Project
-        working-directory: MLProject
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           mlflow run . --env-manager=local
 
+      # Ambil run_id terbaru dari mlruns/0
       - name: Get latest MLflow run_id
         id: get_runid
-        working-directory: MLProject
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
           RUN_ID=$(ls -td mlruns/0/*/ | head -n 1 | sed 's|mlruns/0/||;s|/||')
           echo "RUN_ID=$RUN_ID" >> $GITHUB_ENV
           echo "Latest run_id: $RUN_ID"
 
+      # Upload artifacts (model, plots, dll) sebagai artifact GitHub
       - name: Upload model + artifacts
         uses: actions/upload-artifact@v4
         with:
           name: mlflow-artifacts
-          path: MLProject/mlruns/0/${{ env.RUN_ID }}/artifacts/
+          path: ${{ env.PROJECT_DIR }}/mlruns/0/${{ env.RUN_ID }}/artifacts/
 
+      # Build Docker image dari model MLflow
       - name: Build Docker image from MLflow model
-        working-directory: MLProject
+        working-directory: ${{ env.PROJECT_DIR }}
         run: |
+          RAW_NAME="${{ secrets.DOCKER_IMAGE_NAME }}"
+          # bersihin \r \n dan spasi kiri-kanan
+          IMAGE_NAME=$(echo "$RAW_NAME" | tr -d '\r' | tr -d '\n' | xargs)
+          echo "Building image with name: $IMAGE_NAME"
           mlflow models build-docker \
             --model-uri "runs:/${{ env.RUN_ID }}/rf_best_model" \
-            --name "${{ secrets.DOCKER_IMAGE_NAME }}" \
+            --name "$IMAGE_NAME" \
             --env-manager local
 
+      # Login ke Docker Hub
       - name: Log in to Docker Hub
         uses: docker/login-action@v2
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_ACCESS_TOKEN }}
 
+      # Tag image lokal jadi username/image:latest
       - name: Tag Docker image
         run: |
-          docker tag "${{ secrets.DOCKER_IMAGE_NAME }}" \
-            "${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NAME }}:latest"
+          RAW_NAME="${{ secrets.DOCKER_IMAGE_NAME }}"
+          IMAGE_NAME=$(echo "$RAW_NAME" | tr -d '\r' | tr -d '\n' | xargs)
+          docker tag "$IMAGE_NAME" \
+            "${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:latest"
 
+      # Push ke Docker Hub
       - name: Push Docker image
         run: |
-          docker push "${{ secrets.DOCKER_USERNAME }}/${{ secrets.DOCKER_IMAGE_NAME }}:latest"
+          RAW_NAME="${{ secrets.DOCKER_IMAGE_NAME }}"
+          IMAGE_NAME=$(echo "$RAW_NAME" | tr -d '\r' | tr -d '\n' | xargs)
+          docker push "${{ secrets.DOCKER_USERNAME }}/$IMAGE_NAME:latest"
